@@ -1,0 +1,18 @@
+[
+	{
+		"date" : date
+		"symbol" : "bce",
+		"open" : 13.44,
+		"close" : 12.54,
+		"per_diff" : 0.12 #calculated,
+		"news" : [
+			{
+				"pubdate" : date,
+				"title" : title,
+				"desc" : descript,
+				"positive" : score #calculated,
+				"negative" : score #calculated
+			}
+		]
+	}
+]

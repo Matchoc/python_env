@@ -1,0 +1,1809 @@
+import sys
+import os
+import glob
+import win32gui
+import win32ui
+import win32con
+import win32api
+import numpy
+import json
+import scipy.ndimage
+import multiprocessing
+from time import strftime
+from time import sleep
+from PIL import Image
+from sklearn import svm
+from sklearn import cross_validation
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
+
+
+
+#	"Nucleus09": {
+#		"features" : ["per_of_blue_with_green", "average_size_green_over_average_size_blue", "blue_green_cluster_per_nuclei"],
+#		"exclusion" : []
+#	},
+#	"Misc": {
+#		"features" : ["per_of_blue_with_green", "average_size_green_over_average_size_blue"],
+#		"exclusion" : ["Nucleus09"]
+#	},
+#	"Not01": {
+#		"features" : ["totalGreenPixel"],
+#		"exclusion" : ["Nucleus09"]
+#	},
+#	"Not02": {
+#		"features" : ["totalGreenPixel"],
+#		"exclusion" : ["Nucleus09"]
+#	},
+#	"Cytoplasm09": {
+#		"features" : ["per_of_red_with_green", "average_size_green_over_average_size_blue", "averageRoundnessGreen", "red_green_cluster_per_nuclei"],
+#		"exclusion" : []
+#	},
+	
+
+
+# DEBUG METHOD :
+
+#import matplotlib.pyplot as plt
+#green = [pix[1] for pix in data.binaryList]
+#greenn = numpy.array(green)
+#greenshape = greenn.reshape(395,395)
+#plt.imshow(greenshape)
+#<matplotlib.image.AxesImage object at 0x04123CD0>
+#plt.show()
+
+def getEveScreen():
+	return gEveScreen
+
+def getEveScreenNumpy():
+	return gEveScreenNumpy
+	
+def getEveScreenWidth():
+	return gScreenWidth
+
+def getEveScreenHeight():
+	return gScreenHeight
+
+def boardToDebugRender(binaryList):
+	finalImg = []
+	for binarycolor in binaryList:
+		finalColor = binarycolor[GREEN]#(binarycolor[RED] << 3) + (binarycolor[GREEN] << 2) + (binarycolor[BLUE] << 1)
+		finalImg.append(finalColor)
+		
+	return finalImg
+
+def colorize(listoflist):
+	a = []
+	for index in range(395*395):
+		count = 1
+		found = False
+		for x in listoflist:
+			if index in x:
+				found = True
+				a.append(count)
+				break
+			count += 1
+		if found == False:
+			a.append(0)
+	return a
+	
+
+PRINT_LEVEL = 0
+def myprint(str, level = 0):
+	if level >= PRINT_LEVEL:
+		print(str)
+
+def testClicks():
+	sleeptime = 0.5
+	moveMouse(*BUTTON_COORD["Continue"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus01"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus02"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus03"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus04"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus05"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus06"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus07"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus08"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Nucleus09"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm01"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm02"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm03"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm04"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm05"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm06"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm07"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm08"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm09"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm10"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm11"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm12"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm13"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Cytoplasm14"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Periphery01"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Periphery02"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Periphery03"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Misc"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Not01"])
+	sleep(sleeptime)
+	moveMouse(*BUTTON_COORD["Not02"])
+	sleep(sleeptime)
+
+def findColor(r, g, b):
+	pixelIndex = 0
+	for pix in gEveScreen:
+		if pix[0] == r and pix[1] == g and pix[2] == b:
+			break
+		pixelIndex += 1
+	
+	y = int(pixelIndex / gScreenWidth)
+	x = int(((pixelIndex / gScreenWidth) - y) * gScreenWidth)
+	x += gScreenOffsetL
+	y += gScreenOffsetT
+	#myprint("pixindex : " + str(pixelIndex) + ", Coord(" + str(x) + "," + str(y) + ") with window size(" + str(gScreenWidth) + "," + str(gScreenHeight) + ") and window pos(" + str(gScreenOffsetL) + "," + str(gScreenOffsetT) + ")")
+	return (x,y)
+	
+RED = 0
+GREEN = 1
+BLUE = 2
+SVM_MACHINE = {}
+SCALER = None
+MACHINE_ALL = None
+NUM_PROC = 6
+
+SPECIAL_BUTTON_DATA = {
+	"Continue": "ref\\ContinueBtn2.png",
+	"Submit": "ref\\SubmitBtn.png"
+}
+BUTTON_DATA = {
+	#"test": "tests\\test.png"
+	"Continue": "ref\\ContinueBtn2.png",
+	"Submit": "ref\\SubmitBtn.png",
+	"Cytoplasm01": "ref\\CytoplasmBtn01.png",
+	"Cytoplasm02": "ref\\CytoplasmBtn02.png",
+	"Cytoplasm03": "ref\\CytoplasmBtn03.png",
+	"Cytoplasm04": "ref\\CytoplasmBtn04.png",
+	"Cytoplasm05": "ref\\CytoplasmBtn05.png",
+	"Cytoplasm06": "ref\\CytoplasmBtn06.png",
+	"Cytoplasm07": "ref\\CytoplasmBtn07.png",
+	"Cytoplasm08": "ref\\CytoplasmBtn08.png",
+	"Cytoplasm09": "ref\\CytoplasmBtn09.png",
+	"Cytoplasm10": "ref\\CytoplasmBtn10.png",
+	"Cytoplasm11": "ref\\CytoplasmBtn11.png",
+	"Cytoplasm12": "ref\\CytoplasmBtn12.png",
+	"Cytoplasm13": "ref\\CytoplasmBtn13.png",
+	"Cytoplasm14": "ref\\CytoplasmBtn14.png",
+	"Nucleus01": "ref\\NucleusBtn01.png",
+	"Nucleus02": "ref\\NucleusBtn02.png",
+	"Nucleus03": "ref\\NucleusBtn03.png",
+	"Nucleus04": "ref\\NucleusBtn04.png",
+	"Nucleus05": "ref\\NucleusBtn05.png",
+	"Nucleus06": "ref\\NucleusBtn06.png",
+	"Nucleus07": "ref\\NucleusBtn07.png",
+	"Nucleus08": "ref\\NucleusBtn08.png",
+	"Nucleus09": "ref\\NucleusBtn09.png",
+	"Periphery01": "ref\\PeripheryBtn01.png",
+	"Periphery02": "ref\\PeripheryBtn02.png",
+	"Periphery03": "ref\\PeripheryBtn03.png",
+	"Misc": "ref\\MiscBtn01.png",
+	"Not01": "ref\\NotBtn01.png",
+	"Not02": "ref\\NotBtn02.png"
+}
+BUTTON_COORD = {}
+TRAINING_PATH = "training"
+TRAINING_DATA_NAME = "Cytoplasm01"
+
+gEveScreen = []
+gEveScreenAlpha = []
+gEveScreenNumpy = []
+gEveScreenAlphaNumpy = []
+gScreenOffsetT = 0
+gScreenOffsetL = 0
+gScreenWidth = 0
+gScreenHeight = 0
+BOARD_NUCLEUS_OFFSET = [414, 466] # found that in paint in a screenshot (should be exact as long as you minimize the discovery window as much as possible in-game)
+BOARD_SIZE = [395, 395] # The exact area is I think 400x400, but I'd rather miss a few pixel than get the border by mistake in my calculations
+MIN_FROM_AVERAGE = 0.55
+
+#for debugging and data collecting
+gScreenshotCount = 859
+
+class TrainingData:
+	def __init__(self):
+		self.y = []
+		self.X = []
+		self.files = []
+
+class ProcessData:
+	def __init__(self):
+		self.colorAverage = [0,0,0]
+		self.totalGreenBlack = 0
+		self.totalGreenBlue = 0
+		self.totalGreenRed = 0
+		self.totalRed = 0
+		self.totalBlue = 0
+		self.totalBlack = 0
+		self.totalGreenPixel = 0
+		self.averageRoundnessGreen = 0
+		self.per_of_red_with_green = 0
+		self.per_of_blue_with_green = 0
+		self.per_of_black_with_green = 0
+		self.averageSizeGreenFeatures = 0
+		self.binaryList = []
+		self.green = []
+		self.red = []
+		self.blue = []
+		self.redn = []
+		self.greenn = []
+		self.bluen = []
+		self.resultButtons = []
+		self.cytoplasm = []
+		self.nuclei = [] # list of already found nuclei so we don't count them twice
+		self.greenFeatures = []
+		self.greenFeaturesRoundness = []
+
+	def __repr__(self):
+		a = "color average (" + str(self.colorAverage) + \
+			"),\r\nG/N " + str(self.totalGreenBlack) + ", G/B " + str(self.totalGreenBlue) + ", G/R " + str(self.totalGreenRed) + \
+			")\r\ntotal RGBN(" + str(self.totalRed) + "," + str(self.totalGreenPixel) + "," + str(self.totalBlue) + "," + str(self.totalBlack) + ")" \
+			"\r\n avg round " + str(self.averageRoundnessGreen) + ", average size green " + str(self.averageSizeGreenFeatures) + \
+			"\r\n per Green + RBN(" + str(self.per_of_red_with_green) + "," + str(self.per_of_blue_with_green) + "," + str(self.per_of_black_with_green) + ")"
+		return a
+
+# =============================================================================
+# INITIALIZATION AND UPDATE
+def getWindowByTitle(title_text, exact = False):
+	def _window_callback(hwnd, all_windows):
+		all_windows.append((hwnd, win32gui.GetWindowText(hwnd)))
+	windows = []
+	win32gui.EnumWindows(_window_callback, windows)
+	if exact:
+		return [hwnd for hwnd, title in windows if title_text == title]
+	else:
+		return [hwnd for hwnd, title in windows if title_text in title]	
+
+def getRealResult(im):
+	offsetToGreen = [0, -20] # calculated in paint
+	rez = []
+	for key in BUTTON_COORD:
+		if key == "BoardTopLeft" or key == "Continue" or key == "Submit":
+			continue
+		averageGreen = 0
+		totalPix = 0
+		for y in range(2):
+			for x in range(4):
+				#startIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT], gScreenWidth)
+				buttonCoordX = BUTTON_COORD[key][0] - gScreenOffsetL + x - 2 + offsetToGreen[0]
+				buttonCoordY = BUTTON_COORD[key][1] - gScreenOffsetT + y - 1 + offsetToGreen[1]
+				index = toPixIndex([buttonCoordX, buttonCoordY], gScreenWidth)
+				if index >= 0 and im[index][GREEN] > 30:
+					averageGreen += im[index][GREEN]
+					totalPix += 1
+		averageGreen = averageGreen / totalPix
+		if averageGreen > 120:
+			rez.append(key)
+			
+	return rez
+		
+def takeScreenshot(hwnd = None, tryToFigureOutResults = False):
+	global gScreenshotCount
+	if not hwnd:
+		hwnd=win32gui.GetDesktopWindow()
+	l,t,r,b=win32gui.GetWindowRect(hwnd)
+	gScreenOffsetT = t
+	gScreenOffsetL = l
+	h=b-t
+	w=r-l
+	gScreenWidth = w
+	gScreenHeight = h
+	hDC = win32gui.GetWindowDC(hwnd)
+	myDC=win32ui.CreateDCFromHandle(hDC)
+	newDC=myDC.CreateCompatibleDC()
+
+	myBitMap = win32ui.CreateBitmap()
+	myBitMap.CreateCompatibleBitmap(myDC, w, h)
+
+	newDC.SelectObject(myBitMap)
+
+	win32gui.SetForegroundWindow(hwnd)
+	sleep(.2) #lame way to allow screen to draw before taking shot
+	newDC.BitBlt((0,0),(w, h) , myDC, (0,0), win32con.SRCCOPY)
+	myBitMap.Paint(newDC)
+	pathbmp = "sampleimg\\temp.bmp"
+	
+	timestr = strftime("%Y%m%d-%H%M%S")
+	pathpng = "sampleimg\\sample-" + timestr + ".png"
+	
+	#couldn't find another easy way to convert to png
+	myBitMap.SaveBitmapFile(newDC,pathbmp)
+	im = Image.open(pathbmp)
+	#im.save(pathpng)
+	gScreenshotCount += 1
+	failed = True
+	if tryToFigureOutResults:
+		realResults = getRealResult(list(im.getdata()))
+		if len(realResults) > 0:
+			failed = False
+			myprint("figured out answers " + str(realResults))
+			for result in realResults:
+				pathpng = os.path.join("training", result, "sample-" + timestr + ".png")
+				myprint("Saving screenshot to" + pathpng)
+				im.save(pathpng)
+		
+	if failed:
+		myprint("Saving screenshot to" + pathpng + ", couldn't figure out answer.")
+		im.save(pathpng)
+		
+def updateEveScreen(hwnd = None):
+	global gEveScreen
+	global gEveScreenAlpha
+	global gScreenOffsetT
+	global gScreenOffsetL
+	global gScreenWidth
+	global gScreenHeight
+	
+	global gEveScreenNumpy
+	global gEveScreenAlphaNumpy
+	
+	if not hwnd:
+		hwnd=win32gui.GetDesktopWindow()
+	l,t,r,b=win32gui.GetWindowRect(hwnd)
+	gScreenOffsetT = t
+	gScreenOffsetL = l
+	h=b-t
+	w=r-l
+	gScreenWidth = w
+	gScreenHeight = h
+	hDC = win32gui.GetWindowDC(hwnd)
+	myDC=win32ui.CreateDCFromHandle(hDC)
+	newDC=myDC.CreateCompatibleDC()
+
+	myBitMap = win32ui.CreateBitmap()
+	myBitMap.CreateCompatibleBitmap(myDC, w, h)
+
+	newDC.SelectObject(myBitMap)
+
+	win32gui.SetForegroundWindow(hwnd)
+	sleep(.2) #lame way to allow screen to draw before taking shot
+	newDC.BitBlt((0,0),(w, h) , myDC, (0,0), win32con.SRCCOPY)
+	myBitMap.Paint(newDC)
+	asTuple = myBitMap.GetBitmapBits(False)
+	# transform asTuple into modifiable list
+	gEveScreen = asPILFormat(asTuple, False)
+	gEveScreenAlpha = asPILFormat(asTuple, True)
+	gEveScreenToNumpy()
+	#gEveScreenNumpy = numpy.array(gEveScreen)
+	#gEveScreenNumpy = gEveScreenNumpy.reshape(gScreenHeight, gScreenWidth, 3)
+	#gEveScreenNumpy = gEveScreenNumpy / 255.0
+	
+	#gEveScreenAlphaNumpy = numpy.array(gEveScreenAlpha)
+	
+	myprint("screenWidth : " + str(gScreenWidth) + ", screenHeight : " + str(gScreenHeight) + ", offsetL : " + str(gScreenOffsetL)  + ", offsetT : " + str(gScreenOffsetT))
+	
+def parseUint(val):
+	if val < 0:
+		return val + 2**8
+	else:
+		return val
+	
+def asPILFormat(asTuple, hasAlpha):
+	returnList = []
+	#total = 0
+	#colorCount = 0
+	#color = []
+	if hasAlpha:
+		returnList = [
+			tuple(
+				[
+					parseUint(asTuple[(x*4)+2]), 
+					parseUint(asTuple[(x*4)+1]), 
+					parseUint(asTuple[(x*4)]), 
+					255
+				]
+			) for x in range(int(len(asTuple) / 4))]
+	else:
+		returnList = [
+			tuple(
+				[
+					parseUint(asTuple[(x*4)+2]), 
+					parseUint(asTuple[(x*4)+1]), 
+					parseUint(asTuple[(x*4)])
+				]
+			) for x in range(int(len(asTuple) / 4))]
+		
+	#for pix in asTuple:
+	#	colorCount += 1
+	#	if pix < 0 and colorCount < 4:
+	#		color.insert(0, pix + 2**8)
+	#	elif colorCount < 4:
+	#		color.insert(0, pix)
+	#	if hasAlpha and colorCount >= 4:
+	#		color.append(255)
+	#	if colorCount >= 4:
+	#		returnList[total] = tuple(color)
+	#		total += 1
+	#		color = []
+	#		colorCount = 0
+	return returnList
+	
+def initScreenButtons():
+	global BUTTON_COORD
+	for key in BUTTON_DATA:
+		path = BUTTON_DATA[key]
+		#myprint("----------------------------" + path + "----------------------------")
+		im = Image.open(path)
+		width, height = im.size
+		btnpixeldata = list(im.getdata())
+		hasAlpha = im.mode == "RGBA"
+		coord = searchCoordInScreen(btnpixeldata, width, height, hasAlpha)
+		BUTTON_COORD[key] = coord
+		if (coord == None):
+			myprint("Could not find " + key)
+		else:
+			BUTTON_COORD[key] = coord
+			
+	if BUTTON_COORD["Continue"] == None:
+		myprint("Continue set to Submit")
+		BUTTON_COORD["Continue"] = BUTTON_COORD["Submit"]
+	if BUTTON_COORD["Submit"] == None:
+		myprint("Submit set to Continue")
+		BUTTON_COORD["Submit"] = BUTTON_COORD["Continue"]
+		
+	BUTTON_COORD["BoardTopLeft"] = BUTTON_COORD["Continue"][:] #copy not ref
+	BUTTON_COORD["BoardTopLeft"][0] -= BOARD_NUCLEUS_OFFSET[0]
+	BUTTON_COORD["BoardTopLeft"][1] -= BOARD_NUCLEUS_OFFSET[1]
+		
+def toXYCoord(pixIndex, w):
+	y = int(pixIndex / w)
+	floaty = pixIndex / w
+	fraction = floaty - y
+	timew = fraction * w
+	x = int((((pixIndex / w) - y) * w) + 0.5)
+	return [x, y]
+	
+def toPixIndex(coord, w):
+	if coord[0] >= w or coord[0] < 0 or coord[1] < 0:
+		return -1
+	return (coord[1] * w) + coord[0]
+		
+def searchCoordInScreen(pixelToFind, w, h, hasAlpha):
+	for pixIndex in range(len(gEveScreen)):
+		pix = gEveScreen[pixIndex]
+		if pix[0] == pixelToFind[0][0] and pix[1] == pixelToFind[0][1] and pix[2] == pixelToFind[0][2]:
+			match = True
+			row = 0
+			while(match and row < 1):
+				coordscreen = toXYCoord(pixIndex, gScreenWidth)
+				coordscreen[0] += row
+				screenIndex = toPixIndex(coordscreen, gScreenWidth)
+				if screenIndex > len(gEveScreen):
+					match = False
+					break;
+				
+				coordimg = (row, 0)
+				imgIndex = toPixIndex(coordimg, w)
+				
+				screenline = []
+				if hasAlpha:
+					screenline = gEveScreenAlpha[screenIndex:screenIndex+w]
+				else:
+					screenline = gEveScreen[screenIndex:screenIndex+w]
+				subimgline = pixelToFind[imgIndex:imgIndex+w]
+				intersectpix = set(subimgline).intersection(screenline)
+				#myprint("Found intersection line " + str(row) + " : " + str(intersectpix))
+				if screenline != subimgline:
+					match = False
+				row += 1
+			if match == True:
+				coord = toXYCoord(pixIndex, gScreenWidth)
+				coord[0] += int(w / 2) + gScreenOffsetL
+				coord[1] += int(h / 2) + gScreenOffsetT
+				return coord
+	return None
+	
+def loadAnswers(trainingSet, categoryName):
+	trainingSet.y = []
+	validImage = set()
+	for filename in trainingSet.files:
+		if categoryName in filename:
+			validImage.add(os.path.basename(filename))
+			
+	for filename in trainingSet.files:
+		if os.path.basename(filename) in validImage:
+			trainingSet.y.append(1)
+		else:
+			trainingSet.y.append(0)
+			
+def loadAnswersCombined(trainingSet, categories):
+	answersgrouping = {}
+	for filename in trainingSet.files:
+		basename = os.path.basename(filename)
+		if not basename in answersgrouping:
+			answersgrouping[basename] = [0]*len(categories)
+		catindex = 0
+		for category in categories:
+			if category in filename:
+				answersgrouping[basename][catindex] = 1
+				break;
+			catindex += 1
+		
+	finalAnswerList = []
+	for filename in trainingSet.files:
+		basename = os.path.basename(filename)
+		finalAnswerList.append(answersgrouping[basename])
+		
+	trainingSet.y = finalAnswerList
+		
+	
+	
+def loadJSONTrainingData(trainingSet, lst, excludelst):
+	#training for cytoplasm01
+	labelglob = os.path.join(TRAINING_PATH, "**", "*.json")
+	#labelglob = "sampleimg\\sample0185.png"
+	counttrainingfile = 0
+	trainingfiles = glob.glob(labelglob)
+	excludeset = set()
+	for filename in trainingfiles:
+		for exclusion in excludelst:
+			if exclusion in filename:
+				excludeset.add(os.path.basename(filename))
+	totalfiles = len(trainingfiles)
+	for filename in trainingfiles:
+		if os.path.basename(filename) in excludeset:
+			continue
+		trainingSet.files.append(filename)
+		with open(filename, 'r') as jsonfile:
+			#myprint("loading file " + filename)
+			jsonobj = json.load(jsonfile)
+			trainingSet.X.append([jsonobj.get(x, 0) for x in lst])
+		
+def gEveScreenToNumpy():
+	global gEveScreenNumpy
+	gEveScreenNumpy = numpy.array(gEveScreen)
+	gEveScreenNumpy = gEveScreenNumpy.reshape(gScreenHeight, gScreenWidth, 3)
+	gEveScreenNumpy = gEveScreenNumpy / 255.0
+
+def updateTrainingJsonFile(inputs):
+	global BUTTON_DATA
+	BUTTON_DATA = SPECIAL_BUTTON_DATA
+	
+	global gEveScreen
+	global gEveScreenAlpha
+	global gScreenOffsetT
+	global gScreenOffsetL
+	global gScreenWidth
+	global gScreenHeight
+	
+	global gEveScreenNumpy
+	global gEveScreenAlphaNumpy
+	global PRINT_LEVEL
+	PRINT_LEVEL = 1
+	
+	filename = inputs["filename"]
+	hasAlpha = inputs["hasAlpha"]
+	count = inputs["count"]
+	total = inputs["total"]
+	jsonName = filename + ".json"
+	im = Image.open(filename)
+	gScreenWidth, gScreenHeight = im.size
+	gScreenOffsetT = 0
+	gScreenOffsetL = 0
+	samplehasAlpha = im.mode == "RGBA"
+	if hasAlpha == True and samplehasAlpha == True:
+		gEveScreenAlpha = list(im.getdata())
+		gEveScreen = gEveScreenAlpha # doesn't matter
+	elif hasAlpha == False and samplehasAlpha == False:
+		gEveScreen = list(im.getdata())
+		gEveScreenAlpha = gEveScreen # doesn't matter
+	elif hasAlpha == True and samplehasAlpha == False:
+		gEveScreen = list(im.getdata())
+		gEveScreenAlpha = []
+		for col in gEveScreen:
+			gEveScreenAlpha.append(tuple([col[0], col[1], col[2], 255]))
+	elif hasAlpha == False and samplehasAlpha == True:
+		gEveScreenAlpha = list(im.getdata())
+		gEveScreen = []
+		for col in gEveScreenAlpha:
+			gEveScreen.append(tuple([col[0], col[1], col[2]]))
+			
+	initScreenButtons()
+	
+	gEveScreenToNumpy()
+	
+	data = {}
+	performTests(data)
+	
+	myprint("Writing data to " + jsonName)
+	with open(jsonName, 'w') as jsonfile:
+		jsonstr = json.dumps(data["features"], sort_keys=True,
+			indent=4, separators=(',', ': '))
+		jsonfile.write(jsonstr)
+		
+	myprint(filename + " processing done (" + str(count) + "/" + str(total) + ")", 1)
+	sys.stdout.flush()
+
+	
+def updateTrainingJson(forceAll, disableMultiProcess = False):
+	global gEveScreen
+	global gEveScreenAlpha
+	global gScreenOffsetT
+	global gScreenOffsetL
+	global gScreenWidth
+	global gScreenHeight
+	
+	global gEveScreenNumpy
+	global gEveScreenAlphaNumpy
+	
+	global PRINT_LEVEL
+	PRINT_LEVEL = 1
+	
+	# For training I only need the "continue" button to localize the board
+	# but need to make sure we have the same alpha channels
+	im = Image.open(BUTTON_DATA["Continue"])
+	hasAlpha = im.mode == "RGBA"
+	
+	#training for cytoplasm01
+	labelglob = os.path.join(TRAINING_PATH, "**", "*.png")
+	#labelglob = "training\\Cytoplasm01\\sample0124.png"
+	counttrainingfile = 0
+	trainingfiles = glob.glob(labelglob)
+	totalfiles = len(trainingfiles)
+	
+	if forceAll and not disableMultiProcess:
+		inputs = []
+		count = 0
+		for file in trainingfiles:
+			inputs.append({
+				"filename" : file,
+				"hasAlpha" : hasAlpha,
+				"count" : count,
+				"total" : totalfiles
+			})
+			count += 1
+		myprint("multiprocess", 1)
+		p = multiprocessing.Pool(NUM_PROC)
+		r = p.map(updateTrainingJsonFile, inputs)
+		return
+	
+	for filename in trainingfiles:
+		myprint("------- Train " + filename + " (" + str(counttrainingfile) + "/" + str(totalfiles) + ") ---------")
+		counttrainingfile += 1
+		jsonName = filename + ".json"
+		if forceAll == False and os.path.isfile(jsonName):
+			continue
+		
+		inputs = {}
+		inputs["filename"] = filename
+		inputs["hasAlpha"] = hasAlpha
+		inputs["count"] = counttrainingfile,
+		inputs["total"] = totalfiles
+		updateTrainingJsonFile(inputs)
+			
+		myprint("******** Done **********")
+		
+def blurImage(amount):
+	global gEveScreen
+	global gEveScreenNumpy
+	
+	gEveScreenNumpy = scipy.ndimage.uniform_filter(gEveScreenNumpy, size=(amount, amount, 1))
+	gEveScreenNumpy = gEveScreenNumpy.reshape(gScreenWidth * gScreenHeight, 3)
+	gEveScreenNumpy = gEveScreenNumpy * 255.0
+	gEveScreen = gEveScreenNumpy.tolist()
+	
+def removeBlueRedLeaveBlue(data):
+	for color in data["processing"]["binaryList"]:
+		if color[RED] == 1 and color[BLUE] == 1:
+			color[RED] = 0	
+	
+# =============================================================================	
+# ANALYSE ALGORITHMS
+def numBlackClusterIn(data):
+	totalred = 0
+	totalblue = 0
+	totalgreen = 0
+	for clusterinfo in data["processing"]["dark"]:
+		if isMostlySurroundedByColor(data, clusterinfo, RED):
+			totalred += 1
+		if isMostlySurroundedByColor(data, clusterinfo, BLUE):
+			totalblue += 1
+		if isMostlySurroundedByColor(data, clusterinfo, GREEN):
+			totalgreen += 1
+			
+	data["features"]["average_dark_in_red"] = 0
+	data["features"]["average_dark_in_blue"] = 0
+	data["features"]["average_dark_in_green"] = 0
+	
+	if len(data["processing"]["cytoplasm"]) > 0:
+		data["features"]["average_dark_in_red"] = totalred / len(data["processing"]["cytoplasm"])
+	if len(data["processing"]["nuclei"]) > 0:
+		data["features"]["average_dark_in_blue"] = totalblue / len(data["processing"]["nuclei"])
+	if len(data["processing"]["greenFeatures"]) > 0:
+		data["features"]["average_dark_in_green"] = totalgreen / len(data["processing"]["greenFeatures"])
+
+def averageSizeOfDarkClusterNotTouchingSides(data):
+	sumSize = 0
+	sumValidCluster = 0
+	for clusterinfo in data["processing"]["dark"]:
+		discard = False
+		clustercoord = clusterinfo["clusterCoord"]
+		for coord in clustercoord:
+			if coord[0] <= 0 or coord[1] <= 0:
+				discard = True
+				break
+				
+		if not discard:
+			sumValidCluster += 1
+			sumSize += len(clusterinfo["clusterIndexes"])
+	
+	
+	data["features"]["dark_cluster_size"] = 0
+	if sumValidCluster > 0:
+		data["features"]["filtered_dark_cluster_size_over_average_blue"] = (sumSize / sumValidCluster) / data["features"]["average_size_blue"]
+
+def nucleiAreaGreen(data):
+	myprint("Nuclei Green Area (including dark)")
+	clusterid = 0
+	data["processing"]["nuclei_perimeter"] = []
+	# calculate all nuclei perimeter in a list
+	for clusterinfo in data["processing"]["nuclei"]:
+		perimVec = clusterinfo["clusterPerimeter"]
+		clusterid += 1
+		data["processing"]["nuclei_perimeter"].append(perimVec)
+	
+	# for each nuclei
+	data["processing"]["nuclei_green_info"] = []
+	sumArea = 0
+	sumGreen = 0
+	for perimeter in data["processing"]["nuclei_perimeter"]:
+		minX = BOARD_SIZE[0]
+		minY = BOARD_SIZE[1]
+		maxX = 0
+		maxY = 0
+		# calculate the bounding box
+		for coord in perimeter:
+			if maxX < coord[0]:
+				maxX = coord[0]
+			if maxY < coord[1]:
+				maxY = coord[1]
+			if minX > coord[0]:
+				minX = coord[0]
+			if minY > coord[1]:
+				minY = coord[1]
+		
+		totalArea = 0
+		greenArea = 0
+		for y in range(minY, maxY):
+			inside = False
+			if tuple([minX, y]) in perimeter:
+				inside = True
+			for x in range(minX, maxX):
+				index = toPixIndex([x,y], BOARD_SIZE[0])
+				binColor = data["processing"]["binaryList"][index]
+				if inside == True:
+					totalArea += 1
+					if binColor[GREEN] == 1:
+						greenArea += 1
+				if tuple([x,y]) in perimeter:
+					inside = not inside
+					
+		data["processing"]["nuclei_green_info"].append({"greenArea":greenArea, "totalArea":totalArea})
+		sumArea += totalArea
+		sumGreen += greenArea
+		
+	data["features"]["per_green_over_nuclei"] = sumGreen / sumArea		
+				
+
+def calculateNumDarkClusterPerNuclei(data):
+	myprint("Calculate Dark In Nuclei (# nuclei : " + str(len(data["processing"]["nuclei"])) + ")")
+	clusterid = 0
+	data["processing"]["numdarkNuclei"] = []
+	for clusterinfo in data["processing"]["nuclei"]:
+		perimVec = clusterinfo["clusterPerimeter"]
+		clusterid += 1
+		data["processing"]["numdarkNuclei"].append(numDarkClusterInNuclei(data, perimVec))
+		
+	sum = 0
+	for darkCluster in data["processing"]["numdarkNuclei"]:
+		sum += darkCluster
+	data["features"]["average_dark_cluster_per_nuclei"] = sum / len(data["processing"]["numdarkNuclei"])
+
+def numDarkClusterInNuclei(data, nucleiperim):
+	minX = BOARD_SIZE[0]
+	minY = BOARD_SIZE[1]
+	outside = 0
+	inside = 0
+	for coord in nucleiperim:
+		if minX > coord[0]:
+			minX = coord[0]
+		if minY > coord[1]:
+			minY = coord[1]
+	for darkClusterinfo in data["processing"]["dark"]:
+		clustercoord = darkClusterinfo["clusterCoord"]
+		inout = 0
+		for darkCoord in clustercoord:
+			break
+		#darkCoord = clustercoord[0]
+		for x in range(darkCoord[0] - minX):
+			testCoord = [0,0]
+			testCoord[0] = darkCoord[0] - x
+			testCoord[1] = darkCoord[1]
+			if tuple(testCoord) in nucleiperim:
+				inout += 1
+				
+		if inout % 2 == 0:
+			outside += 1
+		else:
+			inside +=1
+			
+	return inside
+	
+def yellowNumber(data):
+	myprint("calculating yellow percentage")
+	totalpix = 0
+	sumdiff = 0
+	for clusterinfo in data["processing"]["greenFeatures"]:
+		if not isMostlyOverColor(data, clusterinfo["clusterIndexes"], RED):
+			continue
+		for index in clusterinfo["clusterIndexes"]:
+			coordBoard = toXYCoord(index, BOARD_SIZE[0])
+			screenindex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + coordBoard[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + coordBoard[1]], gScreenWidth)
+			totalpix += 1
+			color = gEveScreen[screenindex]
+			# I want the relative gap between red and green. So that 10, 20 is as big a gap as 128, 255. Hence the scaling.
+			scale = 255 / max(color[RED], color[GREEN])
+			sumdiff += abs((color[RED]*scale) - (color[GREEN]*scale))
+	
+	yellownum = 255
+	if totalpix > 0:
+		yellownum = sumdiff / totalpix
+	data["features"]["yellow_number"] = yellownum
+
+def averageDistanceRedGreenClusterFromNuclei(data):
+	myprint("averageDistanceRedGreenClusterFromNuclei")
+	nucleimiddle = []
+	for clusterinfo in data["processing"]["nuclei"]:
+		avgcoord = [0,0]
+		for index in clusterinfo["clusterIndexes"]:
+			coord = toXYCoord(index, BOARD_SIZE[0])
+			avgcoord[0] += coord[0]
+			avgcoord[1] += coord[1]
+		avgcoord[0] = avgcoord[0] / len(clusterinfo["clusterIndexes"])
+		avgcoord[1] = avgcoord[1] / len(clusterinfo["clusterIndexes"])
+		nucleimiddle.append(avgcoord)
+		
+	greenmiddle = []
+	for clusterinfo in data["processing"]["greenFeatures"]:
+		if not isMostlyOverColor(data, clusterinfo["clusterIndexes"], RED):
+			continue
+		avgcoord = [0,0]
+		for index in clusterinfo["clusterIndexes"]:
+			coord = toXYCoord(index, BOARD_SIZE[0])
+			avgcoord[0] += coord[0]
+			avgcoord[1] += coord[1]
+		avgcoord[0] = avgcoord[0] / len(clusterinfo["clusterIndexes"])
+		avgcoord[1] = avgcoord[1] / len(clusterinfo["clusterIndexes"])
+		greenmiddle.append(avgcoord)
+		
+	avgdist = 0
+	for greencoord in greenmiddle:
+		min = -1
+		for nucleicoord in nucleimiddle:
+			x = greencoord[0] - nucleicoord[0]
+			y = greencoord[1] - nucleicoord[1]
+			dist = (x*x + y*y)**0.5
+			if min == -1 or dist < min:
+				min = dist
+		avgdist += min
+	if len(greenmiddle) > 0:
+		avgdist = avgdist / len(greenmiddle)
+		
+	data["features"]["average_distance_redgreen_features_from_nuclei_normalize_by_nuclei_size"] = avgdist / data["features"]["average_size_blue"]
+
+def clusterNumberAsFeature(data):
+	data["features"]["nuclei_count"] = len(data["processing"]["nuclei"])
+	data["features"]["cytoplasm_count"] = len(data["processing"]["cytoplasm"])
+	data["features"]["green_cluster_count"] = len(data["processing"]["greenFeatures"])
+
+def isMostlyOverColor(data, cluster, color):
+	red = [x for x in cluster if data["processing"]["binaryList"][x][color] == 1]
+	if len(red) / len(cluster) > 0.6:
+		return True
+	return False
+	
+def isMostlySurroundedByColor(data, cluster, color):
+	perim = cluster["clusterPerimeter"]
+	totalcolor = 0
+	totalnot = 0
+	binaryList = data["processing"]["binaryList"]
+	for coord in perim:
+		coordu = [coord[0], coord[1] - 1]
+		coordd = [coord[0], coord[1] + 1]
+		coordr = [coord[0] + 1, coord[1]]
+		coordl = [coord[0] - 1, coord[1]]
+		indexu = toPixIndex(coordu, BOARD_SIZE[0])
+		indexd = toPixIndex(coordd, BOARD_SIZE[0])
+		indexr = toPixIndex(coordr, BOARD_SIZE[0])
+		indexl = toPixIndex(coordl, BOARD_SIZE[0])
+		if indexu < len(binaryList) and indexu >= 0 and binaryList[indexu][color] >= 1:
+			totalcolor += 1
+		elif indexu < len(binaryList) and indexu >= 0:
+			totalnot += 1
+		if indexd < len(binaryList) and indexd >= 0 and binaryList[indexd][color] >= 1:
+			totalcolor += 1
+		elif indexd < len(binaryList) and indexd >= 0:
+			totalnot += 1
+		if indexr < len(binaryList) and indexr >= 0 and binaryList[indexr][color] >= 1:
+			totalcolor += 1
+		elif indexr < len(binaryList) and indexr >= 0:
+			totalnot += 1
+		if indexl < len(binaryList) and indexl >= 0 and binaryList[indexl][color] >= 1:
+			totalcolor += 1
+		elif indexl < len(binaryList) and indexl >= 0:
+			totalnot += 1
+			
+	if totalcolor > totalnot:
+		return True
+	else:
+		return False
+	
+
+def RedBlueGreenClusterPerNuclei(data):
+	green_over_red = [x for x in data["processing"]["greenFeatures"] if isMostlyOverColor(data, x["clusterIndexes"], RED)]
+	data["features"]["red_green_cluster_per_nuclei"] = len(green_over_red) / len(data["processing"]["nuclei"])
+	
+	green_over_blue = [x for x in data["processing"]["greenFeatures"] if isMostlyOverColor(data, x["clusterIndexes"], BLUE)]
+	data["features"]["blue_green_cluster_per_nuclei"] = len(green_over_blue) / len(data["processing"]["nuclei"])
+
+def calculateColorAverages(data):
+	myprint("Calculate Color Averages")
+	minThreshold = 30
+	redCount = 0
+	greenCount = 0
+	blueCount = 0
+	data["processing"]["colorAverage"] = [0,0,0]
+	
+	startIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT], gScreenWidth)
+	endIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + BOARD_SIZE[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + BOARD_SIZE[1]], gScreenWidth)
+	startCoord = [BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT]
+	endCoord = [BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + BOARD_SIZE[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + BOARD_SIZE[1]]
+	data["processing"]["binaryList"] = []
+	for y in range(startCoord[1], endCoord[1]):
+		for x in range(startCoord[0], endCoord[0]):
+			index = toPixIndex([x, y], gScreenWidth)
+			if gEveScreen[index][RED] > minThreshold:
+				data["processing"]["colorAverage"][RED] += gEveScreen[index][RED]
+				redCount += 1
+			if gEveScreen[index][GREEN] > minThreshold:
+				data["processing"]["colorAverage"][GREEN] += gEveScreen[index][GREEN]
+				greenCount += 1
+			if gEveScreen[index][BLUE] > minThreshold:
+				data["processing"]["colorAverage"][BLUE] += gEveScreen[index][BLUE]
+				blueCount += 1
+			
+	data["processing"]["colorAverage"][RED] /= redCount
+	data["processing"]["colorAverage"][GREEN] /= greenCount
+	data["processing"]["colorAverage"][BLUE] /= blueCount
+	myprint("Red Avg : " + str(data["processing"]["colorAverage"][RED]) + ", Green Avg : " + str(data["processing"]["colorAverage"][GREEN]) + ", Blue Avg : " + str(data["processing"]["colorAverage"][BLUE]))
+
+#def extractColors(data):
+#	myprint("Extract Color")
+#	startIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT], gScreenWidth)
+#	endIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + BOARD_SIZE[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + BOARD_SIZE[1]], gScreenWidth)
+#	startCoord = [BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT]
+#	endCoord = [BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + BOARD_SIZE[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + BOARD_SIZE[1]]
+	
+#	for y in range(startCoord[1], endCoord[1]):
+#		for x in range(startCoord[0], endCoord[0]):
+#			index = toPixIndex([x, y], gScreenWidth)
+#			# at least 20% of the average blue color of the image
+#			data.red.append(gEveScreen[index][RED])
+#			data.green.append(gEveScreen[index][GREEN])
+#			data.blue.append(gEveScreen[index][BLUE])
+	
+def binaryMap(data):
+	myprint("Calculate Binary Map")
+	startIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT], gScreenWidth)
+	endIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + BOARD_SIZE[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + BOARD_SIZE[1]], gScreenWidth)
+	startCoord = [BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT]
+	endCoord = [BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + BOARD_SIZE[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + BOARD_SIZE[1]]
+	data["processing"]["binaryList"] = []
+	data["processing"]["binaryListBright"] = []
+	averageRed = data["processing"]["colorAverage"][RED]
+	averageGreen = data["processing"]["colorAverage"][GREEN]
+	averageBlue = data["processing"]["colorAverage"][BLUE]
+	for y in range(startCoord[1], endCoord[1]):
+		for x in range(startCoord[0], endCoord[0]):
+			index = toPixIndex([x, y], gScreenWidth)
+			binary = []
+			binaryBright = []
+			# at least 20% of the average blue color of the image
+			if gEveScreen[index][RED] >= averageRed * MIN_FROM_AVERAGE:
+				binary.append(1)
+			else:
+				binary.append(0)
+			
+			if gEveScreen[index][GREEN] >= averageGreen * MIN_FROM_AVERAGE:
+				binary.append(1)
+			else:
+				binary.append(0)
+			
+			if gEveScreen[index][BLUE] >= averageBlue * MIN_FROM_AVERAGE:
+				binary.append(1)
+			else:
+				binary.append(0)
+				
+			# if 20% above average
+			if gEveScreen[index][RED] >= averageRed * (1 + MIN_FROM_AVERAGE):
+				binaryBright.append(1)
+			else:
+				binaryBright.append(0)
+			
+			if gEveScreen[index][GREEN] >= averageGreen * (1 + MIN_FROM_AVERAGE):
+				binaryBright.append(1)
+			else:
+				binaryBright.append(0)
+			
+			if gEveScreen[index][BLUE] >= averageBlue * (1 + MIN_FROM_AVERAGE):
+				binaryBright.append(1)
+			else:
+				binaryBright.append(0)
+				
+			data["processing"]["binaryList"].append(binary)
+			data["processing"]["binaryListBright"].append(binary)
+		
+def calculateGreenAverageOver(data):
+	myprint("CalculateGreenAverageOver")
+	data["features"]["totalGreenBlack"] = 0
+	data["features"]["totalGreenBlue"] = 0
+	data["features"]["totalGreenRed"] = 0
+	data["features"]["totalRed"] = 0
+	data["features"]["totalBlue"] = 0
+	data["features"]["totalBlack"] = 0
+	data["features"]["totalGreenPixel"] = 0
+	for bin in data["processing"]["binaryList"]:
+		if bin[GREEN] >= 1:
+			data["features"]["totalGreenPixel"] += 1
+		if bin[RED] >= 1:
+			data["features"]["totalRed"] += 1
+			if bin[GREEN] >= 1:
+				data["features"]["totalGreenRed"] += 1
+		if bin[BLUE] >= 1:
+			data["features"]["totalBlue"] += 1
+			if bin[GREEN] >= 1:
+				data["features"]["totalGreenBlue"] += 1
+		if bin[RED] == 0 and bin[BLUE] == 0:
+			data["features"]["totalBlack"] += 1
+			if bin[GREEN] >= 1:
+				data["features"]["totalGreenBlack"] += 1
+	
+	#myprint("total Red (" + str(data.totalGreenRed) + ") : " + str(data.totalRed) +
+	#" , total Green : " + str(data.totalGreenPixel) +
+	#" , total Blue (" + str(data.totalGreenBlue) + ") : " + str(data.totalBlue) +
+	#" , total Black (" + str(data.totalGreenBlack) + ") : " + str(data.totalBlack))
+		
+
+def collectSurroundingData(pixIndex, collection, binaryList, color, matchAllColor = False):
+	indexes = set()
+	indexes.add(pixIndex)
+	clusterinfo = {}
+	newCluster = set()
+	while len(indexes) > 0:
+		index = indexes.pop()
+		if not isIndexInList(index, collection):
+			newCluster.add(index)
+			coord = toXYCoord(index, BOARD_SIZE[0])
+			coordu = [coord[0], coord[1] - 1]
+			coordd = [coord[0], coord[1] + 1]
+			coordr = [coord[0] + 1, coord[1]]
+			coordl = [coord[0] - 1, coord[1]]
+			indexu = toPixIndex(coordu, BOARD_SIZE[0])
+			indexd = toPixIndex(coordd, BOARD_SIZE[0])
+			indexr = toPixIndex(coordr, BOARD_SIZE[0])
+			indexl = toPixIndex(coordl, BOARD_SIZE[0])
+			if isIndexElement(indexu, binaryList, color) and not indexu in newCluster and (matchAllColor == False or isMatchAllColors(binaryList, index, indexu)):
+				indexes.add(indexu)
+			if isIndexElement(indexd, binaryList, color) and not indexd in newCluster and (matchAllColor == False or isMatchAllColors(binaryList, index, indexd)):
+				indexes.add(indexd)
+			if isIndexElement(indexr, binaryList, color) and not indexr in newCluster and (matchAllColor == False or isMatchAllColors(binaryList, index, indexr)):
+				indexes.add(indexr)
+			if isIndexElement(indexl, binaryList, color) and not indexl in newCluster and (matchAllColor == False or isMatchAllColors(binaryList, index, indexl)):
+				indexes.add(indexl)
+
+	minClusterSize = 10
+	if len(newCluster) > minClusterSize:
+		minX = -1
+		minY = -1
+		for index in newCluster:
+			coord = toXYCoord(index, BOARD_SIZE[0])
+			if minX < 0 or minX > coord[0]:
+				minX = coord[0]
+				minY = coord[1]
+		perim = calculatePerimeter(newCluster, [minX, minY], False)
+		clustercoord = clusterIndexToClusterCoord(newCluster)
+		clusterinfo["clusterIndexes"] = newCluster
+		clusterinfo["clusterPerimeter"] = perim
+		clusterinfo["clusterCoord"] = clustercoord
+		collection.append(clusterinfo)
+
+def isMatchAllColors(binaryList, curIndex, newIndex):
+	return binaryList[curIndex][RED] == binaryList[newIndex][RED] and binaryList[curIndex][GREEN] == binaryList[newIndex][GREEN] and binaryList[curIndex][BLUE] == binaryList[newIndex][BLUE]
+		
+def isIndexElement(index, binaryList, color):
+	if index < 0 or index >= len(binaryList) or (color >= 0 and binaryList[index][color] <= 0):
+		return False
+	return True
+			
+def isIndexInList(index, listOfList):
+	for sublist in listOfList:
+		if index in sublist["clusterIndexes"]:
+			return True
+			
+	return False
+	
+def collectCells(data):
+	myprint("Collect Cells clusters")
+	data["processing"]["cytoplasm"] = []
+	data["processing"]["nuclei"] = [] # list of already found nuclei so we don't count them twice
+	data["processing"]["greenFeatures"] = []
+	data["processing"]["dark"] = []
+	# look for blue nuclei (there's only one per cell)
+	start = [0,0]
+	end = BOARD_SIZE
+	for y in range(start[1], end[1]):
+		for x in range(start[0], end[0]):
+			index = toPixIndex([x,y], BOARD_SIZE[0])
+			if data["processing"]["binaryList"][index][RED] > 0 and not isIndexInList(index, data["processing"]["cytoplasm"]):
+				collectSurroundingData(index, data["processing"]["cytoplasm"], data["processing"]["binaryList"], RED)
+			if data["processing"]["binaryList"][index][GREEN] > 0 and not isIndexInList(index, data["processing"]["greenFeatures"]):
+				collectSurroundingData(index, data["processing"]["greenFeatures"], data["processing"]["binaryList"], GREEN, True)
+			if data["processing"]["binaryList"][index][BLUE] > 0 and not isIndexInList(index, data["processing"]["nuclei"]):
+				collectSurroundingData(index, data["processing"]["nuclei"], data["processing"]["binaryList"], BLUE)
+			if data["processing"]["binaryList"][index][RED] == 0 and \
+				data["processing"]["binaryList"][index][GREEN] == 0 and \
+				data["processing"]["binaryList"][index][BLUE] == 0 and \
+				not isIndexInList(index, data["processing"]["dark"]):
+				collectSurroundingData(index, data["processing"]["dark"], data["processing"]["binaryList"], -1, True)
+
+def clusterIndexToClusterCoord(cluster):
+	clustercoord = set()
+	for index in cluster:
+		clustercoord.add(tuple(toXYCoord(index, BOARD_SIZE[0])))
+		
+	return clustercoord
+	
+				
+def calculatePerimeter(cluster, startCoord, verbose):
+	perimeter = set()
+	perimeter.add(tuple(startCoord))
+	current = startCoord
+	dirs = numpy.array([[0,-1], [-1,-1], [-1,0], [-1,1], [0,1], [1,1], [1,0], [1,-1]])
+	backtrace = numpy.array([5, 6, 0, 0, 2, 2, 4, 4])
+	clustercoord = clusterIndexToClusterCoord(cluster)
+	i = 0
+	start = 0
+	# have to move in from an empty direction or the algorithm fails
+	for x in range(len(dirs)):
+		move = (start + x) % len(dirs)
+		inspect = current + dirs[move]
+		inspecttuple = tuple(inspect)
+		if not inspecttuple in clustercoord:
+			start = x
+			break
+
+	# this algo has a weakness where it will stop early.
+	# the easy solution is to loop twice.
+	while not numpy.array_equal(current, startCoord) or i < 10:
+		if numpy.array_equal(current, startCoord):
+			i += 1
+		for x in range(len(dirs)):
+			move = (start + x) % len(dirs)
+			inspect = current + dirs[move]
+			inspecttuple = tuple(inspect)
+			if inspecttuple in clustercoord:
+				if inspecttuple not in perimeter:
+					perimeter.add(inspecttuple)
+				current = inspect
+				start = backtrace[move] # backtrace (http://www.imageprocessingplace.com/downloads_V3/root_downloads/tutorials/contour_tracing_Abeer_George_Ghuneim/moore.html)
+				break
+	return perimeter
+				
+def calculateRoundness(data):
+	myprint("Calculate Roundness of Green Clusters (# cluster : " + str(len(data["processing"]["greenFeatures"])) + ")")
+	clusterid = 0
+	data["processing"]["greenFeaturesRoundness"] = []
+	data["processing"]["greenFeaturesRoundnessNuclei"] = []
+	data["processing"]["greenFeaturesRoundnessCytoplasm"] = []
+	for clusterinfo in data["processing"]["greenFeatures"]:
+		perimVec = clusterinfo["clusterPerimeter"]
+		#myprint("--- calculated perim of " + str(len(perimVec)) + " for cluster " + str(clusterid))
+		clusterid += 1
+		if isMostlyOverColor(data, clusterinfo["clusterIndexes"], RED):
+			data["processing"]["greenFeaturesRoundnessCytoplasm"].append({"size":len(clusterinfo["clusterIndexes"]), "roundness":4 * 3.14159265*len(clusterinfo["clusterIndexes"]) / len(perimVec)**2})
+		elif isMostlyOverColor(data, clusterinfo["clusterIndexes"], BLUE):
+			data["processing"]["greenFeaturesRoundnessNuclei"].append({"size":len(clusterinfo["clusterIndexes"]), "roundness":4 * 3.14159265*len(clusterinfo["clusterIndexes"]) / len(perimVec)**2})
+		else:
+			data["processing"]["greenFeaturesRoundness"].append({"size":len(clusterinfo["clusterIndexes"]), "roundness":4 * 3.14159265*len(clusterinfo["clusterIndexes"]) / len(perimVec)**2})
+		#myprint("Cluster at (" + str(minX) + ", " + str(minY) + ") area : " + str(len(cluster)) + ", perimeter : " + str(len(perimVec)) + " and has roundness of " + str(data.greenFeaturesRoundness[-1]))
+		
+		#sum of all pixel is my area in px2
+		#contour tracing pixel is my perimeter
+		#Estimate each object's area and perimeter. Use these results to form a simple metric indicating the roundness of an object:
+		#metric = 4*pi*area/perimeter^2.
+		#This metric is equal to one only for a circle and it is less than one for any other shape.
+
+def calculateAverage(data):
+	myprint("Calculate Various averages")
+	sumCyto = 0
+	totalCyto = 0
+	sumNuclei = 0
+	totalNuclei = 0
+	sumDark = 0
+	totalDark = 0
+	sum = 0
+	total = 0
+	size_green_over_red = 0
+	count_green_over_red = 0
+	size_green_over_blue = 0
+	count_green_over_blue = 0
+	size_green_over_dark = 0
+	count_green_over_dark = 0
+	for x in data["processing"]["greenFeaturesRoundnessNuclei"]:
+		sumNuclei += x["roundness"] * x["size"]
+		totalNuclei += x["size"]
+	for x in data["processing"]["greenFeaturesRoundnessCytoplasm"]:
+		sumCyto += x["roundness"] * x["size"]
+		totalCyto += x["size"]
+	for x in data["processing"]["greenFeaturesRoundness"]:
+		sumDark += x["roundness"] * x["size"]
+		totalDark += x["size"]
+	
+	for x in range(len(data["processing"]["greenFeatures"])):
+		#myprint(str(x) + " : roundess " + str(data["processing"]["greenFeaturesRoundness"][x]) + ", len " + str(len(data["processing"]["greenFeatures"][x])))
+		#sum += data["processing"]["greenFeaturesRoundness"][x] * len(data["processing"]["greenFeatures"][x])
+		total += len(data["processing"]["greenFeatures"][x]["clusterIndexes"])
+		if isMostlyOverColor(data, data["processing"]["greenFeatures"][x]["clusterIndexes"], RED):
+			size_green_over_red += len(data["processing"]["greenFeatures"][x]["clusterIndexes"])
+			count_green_over_red += 1
+		elif isMostlyOverColor(data, data["processing"]["greenFeatures"][x]["clusterIndexes"], BLUE):
+			size_green_over_blue += len(data["processing"]["greenFeatures"][x]["clusterIndexes"])
+			count_green_over_blue += 1
+		else:
+			size_green_over_dark += len(data["processing"]["greenFeatures"][x]["clusterIndexes"])
+			count_green_over_dark += 1
+	
+	totalblue = 0
+	for x in data["processing"]["nuclei"]:
+		totalblue += len(x["clusterIndexes"])
+	
+	data["features"]["average_size_green_over_blue_over_average_size_blue"] = 0
+	data["features"]["average_size_green_over_red_over_average_size_blue"] = 0
+	data["features"]["average_size_green_over_dark_over_average_size_blue"] = 0
+	data["features"]["average_roundness_green_cytoplasm"] = 0
+	data["features"]["average_roundness_green_nuclei"] = 0
+	data["features"]["average_roundness_green_dark"] = 0
+	
+	average_size_blue = 1
+	average_size_green = 0
+	if totalCyto > 0:
+		data["features"]["average_roundness_green_cytoplasm"] = sumCyto / totalCyto
+	if totalNuclei > 0:
+		data["features"]["average_roundness_green_nuclei"] = sumNuclei / totalNuclei
+	if totalDark > 0:
+		data["features"]["average_roundness_green_dark"] = sumDark / totalDark
+	if len(data["processing"]["nuclei"]) > 0:
+		average_size_blue = totalblue / len(data["processing"]["nuclei"])
+		if count_green_over_blue > 0:
+			data["features"]["average_size_green_over_blue_over_average_size_blue"] = (size_green_over_blue / count_green_over_blue) / average_size_blue
+		if count_green_over_red > 0:
+			data["features"]["average_size_green_over_red_over_average_size_blue"] = (size_green_over_red / count_green_over_red) / average_size_blue
+		if count_green_over_dark > 0:
+			data["features"]["average_size_green_over_dark_over_average_size_blue"] = (size_green_over_dark / count_green_over_dark) / average_size_blue
+	if len(data["processing"]["greenFeatures"]) > 0:
+		average_size_green = total / len(data["processing"]["greenFeatures"])
+		# the idea is that sometimes the image has many small cells (represented by the blue nuclei)
+		# and sometimes a few big cells. I want the size of the feature to stay proportional to the size of each cells
+		data["features"]["average_size_green_over_average_size_blue"] = average_size_green / average_size_blue
+	
+	data["features"]["per_of_red_with_green"] = data["features"]["totalGreenRed"] / data["features"]["totalRed"]
+	data["features"]["per_of_blue_with_green"] = data["features"]["totalGreenBlue"] / data["features"]["totalBlue"]
+	data["features"]["per_of_black_with_green"] = data["features"]["totalGreenBlack"] / data["features"]["totalBlack"]
+	data["features"]["average_size_blue"] = average_size_blue
+	data["features"]["average_size_green"] = average_size_green
+				
+# =============================================================================
+# WINAPI SEQUENCE RUN
+def moveMouse(x,y):
+	win32api.SetCursorPos((x,y))	
+
+def click(x,y):
+	win32api.SetCursorPos((x,y))
+	sleep(.5)
+	win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,x,y,0,0)
+	sleep(.5)
+	win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,x,y,0,0)
+
+def runSequence(buttons, screenshotResult):
+	for button in buttons:
+		#myprint("clicking " + button + " : (" + str(BUTTON_COORD[button]) + ")")
+		click(*BUTTON_COORD[button])
+		# Needed to make the overlay disapear so that the next button is exposed
+		#myprint("1. clicking Continue : (" + str(BUTTON_COORD["Continue"]) + ")")
+		moveMouse(*BUTTON_COORD["BoardTopLeft"])
+		sleep(1.0)
+	#myprint("2. clicking Continue : (" + str(BUTTON_COORD["Continue"]) + ")")
+	click(*BUTTON_COORD["Continue"])
+	sleep(10.0)
+	if screenshotResult != None:
+		takeScreenshot(screenshotResult, True)
+	#myprint("3. clicking Continue : (" + str(BUTTON_COORD["Continue"]) + ")")
+	click(*BUTTON_COORD["Continue"])
+	sleep(4.0)
+	#myprint("4. clicking Continue : (" + str(BUTTON_COORD["Continue"]) + ")")
+	click(*BUTTON_COORD["Continue"])
+	sleep(10.0)
+	
+def performTests(data):
+	#data = {}
+	data["features"] = {}
+	data["processing"] = {}
+	
+	blurImage(2)
+	calculateColorAverages(data)
+	binaryMap(data)
+	removeBlueRedLeaveBlue(data)
+	calculateGreenAverageOver(data)
+	collectCells(data)
+	calculateRoundness(data)
+	calculateAverage(data)
+	RedBlueGreenClusterPerNuclei(data)
+	clusterNumberAsFeature(data)
+	averageDistanceRedGreenClusterFromNuclei(data)
+	calculateNumDarkClusterPerNuclei(data)
+	yellowNumber(data)
+	nucleiAreaGreen(data)
+	averageSizeOfDarkClusterNotTouchingSides(data)
+	numBlackClusterIn(data)
+	
+def runPaint(data):
+	handle = getWindowByTitle("Paint", False)
+	updateEveScreen(handle[0])
+	initScreenButtons()
+	performTests(data)
+	#data.redn = numpy.array(data.red)
+	#data.redn = data.redn.reshape(395,395)
+	
+	#data.greenn = numpy.array(data.green)
+	#data.greenn = data.greenn.reshape(395,395)
+	
+	#data.bluen = numpy.array(data.blue)
+	#data.bluen = data.bluen.reshape(395,395)
+	
+def gen_machine_all():
+	global MACHINE_ALL
+	global SCALER
+	SCALER = StandardScaler()
+	featurejson = ""
+	with open("ref\\features.json", 'r') as jsonfile:
+		featurejson = json.load(jsonfile)
+		
+	#MACHINE_ALL = svm.SVC(probability=True)
+	# Load training Json and create SVM machine
+	trainingSet = TrainingData()
+	loadJSONTrainingData(trainingSet, featurejson["All"]["features"], featurejson["All"]["exclusion"])
+	cats = featurejson.keys()
+	cats = list(cats)
+	cats.remove("All")
+	loadAnswersCombined(trainingSet, cats)
+	
+	#MACHINE_ALL = MLPClassifier(solver='sgd', alpha=1e-3, hidden_layer_sizes=(150,58), random_state=1, activation="logistic", max_iter=4000, batch_size=590)
+	#MACHINE_ALL = MLPClassifier(solver='lbgfs', alpha=1e-3, hidden_layer_sizes=(500,58), random_state=1, activation="relu", max_iter=4000, batch_size=590)
+	MACHINE_ALL = MLPClassifier(solver='lbgfs', alpha=1e-2, hidden_layer_sizes=(150, 29), random_state=1, activation="relu", max_iter=4000, batch_size=590)
+	SCALER.fit(trainingSet.X)
+	trainingSet.X = SCALER.transform(trainingSet.X) 
+	MACHINE_ALL.fit(trainingSet.X, trainingSet.y)
+	
+	myprint("Training set for ALL : " + str(trainingSet.y))
+	myprint("files : " + str(trainingSet.files))
+	myprint("cats : " + str(cats))
+	#scores = cross_validation.cross_val_score(SVM_MACHINE[key], trainingSet.X, trainingSet.y, cv=5)
+	#print(scores)
+	#MACHINE_ALL.fit(trainingSet.X, trainingSet.y)
+	
+	
+def gen_svm(key):
+	global SVM_MACHINE
+	featurejson = ""
+	with open("ref\\features.json", 'r') as jsonfile:
+		featurejson = json.load(jsonfile)
+	
+	if not key in featurejson:
+		myprint("No training features for " + key)
+		SVM_MACHINE[key] = None
+		return SVM_MACHINE[key]
+	
+	#myprint("training data : " + str(trainingSet.X))
+	SVM_MACHINE[key] = svm.SVC(probability=True, kernel='linear', class_weight={1:2.0, 0:0.5})
+	# Load training Json and create SVM machine
+	trainingSet = TrainingData()
+	loadJSONTrainingData(trainingSet, featurejson[key]["features"], featurejson[key]["exclusion"])
+	loadAnswers(trainingSet, key)
+	#myprint("fitting " + key)
+	#myprint("with answers : " + str(trainingSet.y))
+	if len(set(trainingSet.y)) <= 1:
+		myprint("Not enough training data for " + key)
+		SVM_MACHINE[key] = None
+		return SVM_MACHINE[key]
+	
+	myprint("Training set for " + key + " : " + str(trainingSet.y))
+	#scores = cross_validation.cross_val_score(SVM_MACHINE[key], trainingSet.X, trainingSet.y, cv=5)
+	#print(scores)
+	SVM_MACHINE[key].fit(trainingSet.X, trainingSet.y)
+	
+	print(SVM_MACHINE[key].coef_)
+	print(SVM_MACHINE[key].intercept_)
+	return SVM_MACHINE[key]
+	
+def test(sample, against):
+	featurejson = ""
+	with open("ref\\features.json", 'r') as jsonfile:
+		featurejson = json.load(jsonfile)
+	
+	#myprint("starting run...")
+	countmatch = 0
+	counttotal = 0
+	labelglob = os.path.join(TRAINING_PATH, "**", "*.json")
+	setoftrue = set()
+	for filename in labelglob:
+		if sample in filename:
+			setoftrue.add(os.path.basename(filename))
+	
+	for filename in glob.glob("training\\" + against + "\\*.json"):
+		resultButtons = []
+		basefilename = os.path.basename(filename)
+		with open(filename, 'r') as jsonfile:
+			jsonobj = json.load(jsonfile)
+
+		X = [[jsonobj.get(x, 0) for x in featurejson[sample]["features"]]]
+		#myprint("data : " + str(X))
+		if SVM_MACHINE[sample] != None:
+			res = SVM_MACHINE[sample].predict(X)[0]
+			print(res)
+			res2 = SVM_MACHINE[sample].decision_function(X)
+			print(res2)	
+			res3 = SVM_MACHINE[sample].predict_proba(X)
+			print(res3)
+			if res == 1:
+				resultButtons.append(sample)
+				
+		#myprint("results : " + str(resultButtons))
+		if basefilename in setoftrue and sample in resultButtons and sample == against:
+			countmatch += 1 # good should return 1 so 1 point
+		elif basefilename in setoftrue and sample in resultButtons and sample != against:
+			countmatch += 0 # good because it's a valid duplicate but we're counting bad because sample != against so 0 points
+		elif sample in resultButtons:
+			countmatch += 1 # good because it's bad
+		counttotal += 1
+		
+	if counttotal > 0:
+		myprint(sample + " against " + against + " : countmatch = " + str(countmatch) + ", count total = " + str(counttotal) + " per = " + str(countmatch / counttotal))
+	return counttotal, countmatch
+	
+	
+#def runInGame():
+#	handle = getWindowByTitle("EVE - Miss Tadaruwa", True)
+#	updateEveScreen(handle[0])
+#	initScreenButtons()
+def processProba(featurejson, proba):
+	resultButtons = []
+	cats = featurejson.keys()
+	cats = list(cats)
+	cats.remove("All")
+	
+	x = 0
+	probadict = {}
+	for x in range(len(cats)):
+		probadict[proba[x]] = cats[x]
+		
+	sortedproba = sorted(probadict.keys(), reverse=True)
+	debug_output = ""
+	for key in sortedproba:
+		debug_output = debug_output + str(key) + " : " + str(probadict[key]) + ", "
+	print(debug_output)
+	
+	for f in sortedproba:
+		if f > 0.5:
+			a = set(resultButtons)
+			b = set(featurejson[probadict[f]]["exclusion"])
+			if (len(a.intersection(b)) > 0):
+				continue
+			resultButtons.append(probadict[f])
+		else:
+			break
+	
+	if len(resultButtons) <= 0:
+		resultButtons.append(probadict[sortedproba[0]])
+		if (probadict[sortedproba[0]] == "Nucleus01" and probadict[sortedproba[1]] == "Nucleus02") or (probadict[sortedproba[0]] == "Nucleus02" and probadict[sortedproba[1]] == "Nucleus01"):
+			resultButtons.append(probadict[sortedproba[2]])
+		else:
+			resultButtons.append(probadict[sortedproba[1]])
+	
+	return resultButtons[:2]
+	
+def gathersamplesAll(numSample, usePaint):
+	featurejson = ""
+	with open("ref\\features.json", 'r') as jsonfile:
+		featurejson = json.load(jsonfile)
+	
+	if not usePaint:
+		handle = getWindowByTitle("EVE - Miss Tadaruwa", True)
+	else:
+		handle = getWindowByTitle("Paint", False)
+	updateEveScreen(handle[0])
+	initScreenButtons()
+	
+	gen_machine_all()
+		
+	#1. Run Eve Online
+	#2. Open the Discovery window and let a sample load (skip tutorial)
+	#3. Run script
+	#4. This will play 100 games and take a screenshot of the result and put it in "samples" folder
+	for x in range(numSample):
+		myprint("-------- Processing img " + str(gScreenshotCount) + "----------")
+		data = {}
+		performTests(data)
+		resultButtons = []
+		X = [[data["features"].get(x, 0) for x in featurejson["All"]["features"]]]
+		out = []
+		i = 0
+		for j in featurejson["All"]["features"]:
+			out.append([j, X[0][i]])
+			i += 1
+		myprint("data All : " + str(out))
+		X = SCALER.transform(X)
+		#myprint("data All : " + str(X))
+		res = MACHINE_ALL.predict(X)[0]
+		print(res)
+		proba = MACHINE_ALL.predict_proba(X)[0]
+		
+		resultButtons = processProba(featurejson, proba)
+	
+		myprint("The machine learning says : " + str(resultButtons))
+		if len(resultButtons) <= 0:
+			myprint("ok, adding Cytoplasm01")
+			resultButtons.append("Cytoplasm01")
+		
+		if not usePaint:
+			runSequence(resultButtons, handle[0])
+		else:
+			runSequence(resultButtons, None)
+		updateEveScreen(handle[0])
+	
+def gathersamples(numSample):
+	global SVM_MACHINE
+	featurejson = ""
+	with open("ref\\features.json", 'r') as jsonfile:
+		featurejson = json.load(jsonfile)
+		
+	handle = getWindowByTitle("EVE - Miss Tadaruwa", True)
+	#handle = getWindowByTitle("Paint", False)
+	updateEveScreen(handle[0])
+	initScreenButtons()
+	
+	keys = BUTTON_DATA.keys()
+	keys = list(keys)
+	
+	p = multiprocessing.Pool(NUM_PROC)
+	r = p.map(gen_svm, keys)
+	for x in range(len(r)):
+		SVM_MACHINE[keys[x]] = r[x]
+	
+	#for key in BUTTON_DATA:
+	#	gen_svm(key)
+		
+	#1. Run Eve Online
+	#2. Open the Discovery window and let a sample load (skip tutorial)
+	#3. Run script
+	#4. This will play 100 games and take a screenshot of the result and put it in "samples" folder
+	for x in range(numSample):
+		myprint("-------- Processing img " + str(gScreenshotCount) + "----------")
+		data = {}
+		performTests(data)
+		resultButtons = []
+		for key in SVM_MACHINE:
+			if SVM_MACHINE[key] != None:
+				X = [[data["features"].get(x, 0) for x in featurejson[key]["features"]]]
+				myprint("data " + key + " : " + str(X))
+				res = SVM_MACHINE[key].predict(X)[0]
+				res2 = SVM_MACHINE[key].decision_function(X)
+				print(res2)	
+				res3 = SVM_MACHINE[key].predict_proba(X)
+				print(res3)
+				if res == 1:
+					resultButtons.append(key)
+		
+		myprint("The machine learning says : " + str(resultButtons))
+		if len(resultButtons) <= 0:
+			myprint("ok, adding Cytoplasm01")
+			resultButtons.append("Cytoplasm01")
+			
+		runSequence(resultButtons, None)
+		updateEveScreen(handle[0])
+	
+def compute_diff(j1, j2, keys):
+	diff = {}
+	#keys = set(list(j1.keys()) + list(j2.keys()))
+	acc = 0
+	for k in keys:
+		diff[k] = abs(j1.get(k, 0) - j2.get(k, 0))
+		acc += diff[k]
+	diff['DIFFERENCE'] = acc
+	return diff
+	
+def test_diff(file, pattern):
+	with open("ref\\features.json", 'r') as jsonfile:
+		featurejson = json.load(jsonfile)
+	filenames = glob.glob(pattern)
+	filetocompare = file
+	with open(filetocompare, 'r') as jsonfile:
+		comparej = json.load(jsonfile)
+	difffilename = ""
+	diff = {}
+	bestSum = -1
+	for filename in filenames:
+		with open(filename, 'r') as jsonfile:
+			opjson = json.load(jsonfile)
+		curdiff = compute_diff(comparej, opjson, featurejson["All"]["features"])
+		if bestSum < 0 or bestSum > curdiff['DIFFERENCE']:
+			difffilename = filename
+			diff = curdiff
+			bestSum = curdiff['DIFFERENCE']
+			
+		jsonstr = json.dumps(curdiff, sort_keys=True,
+			indent=4, separators=(',', ': '))
+		print(filetocompare + " vs " + filename + " lowest sum " + str(curdiff['DIFFERENCE']) + " : " + jsonstr)
+	
+	jsonstr = json.dumps(diff, sort_keys=True,
+			indent=4, separators=(',', ': '))
+	print(filetocompare + " vs " + difffilename + " lowest sum " + str(bestSum) + " : " + jsonstr)
+	
+	
+if __name__ == '__main__':	
+	#myprint("clicking " + button + " : (" + str(BUTTON_COORD[button]) + ")")
+	#click(*BUTTON_COORD["Periphery01"])
+	# Needed to make the overlay disapear so that the next button is exposed
+	#myprint("1. clicking Continue : (" + str(BUTTON_COORD["Continue"]) + ")")
+	#moveMouse(*BUTTON_COORD["BoardTopLeft"])
+	#sleep(1.0)
+	#click(*BUTTON_COORD["Cytoplasm01"])
+	#moveMouse(*[0,0])
+	#sys.exit()
+	
+	#startIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT], gScreenWidth)
+	#endIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + BOARD_SIZE[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + BOARD_SIZE[1]], gScreenWidth)
+	#startCoord = toXYCoord(startIndex, gScreenWidth)
+	#endCoord = toXYCoord(endIndex, gScreenWidth)
+	#moveMouse(startCoord[0] + gScreenOffsetL, startCoord[1] + gScreenOffsetT)
+	#sleep(1.0)
+	#moveMouse(endCoord[0] + gScreenOffsetL, endCoord[1] + gScreenOffsetT)
+	#sys.exit()
+	
+	#gathersamplesAll(500, True)
+	#sys.exit()
+	
+	#gathersamples(1)
+	#sys.exit()
+	# Generate Training data in a csv file (for the selected TRAINING_DATA_NAME)
+	BUTTON_DATA = SPECIAL_BUTTON_DATA
+	updateTrainingJson(True, False)
+	sys.exit()
+	
+	
+	handle = getWindowByTitle("Paint", False)
+	#handle = getWindowByTitle("EVE - Miss Tadaruwa", True)
+	updateEveScreen(handle[0])
+	initScreenButtons()
+	data = {}
+	performTests(data)
+	
+	sys.exit()
+	
+	testMachine = 'Nucleus02'
+	gen_svm(testMachine)
+	#sys.exit()
+	
+	counttotal = 0
+	countbon = 0
+	key = "Nucleus02"
+	#for key in BUTTON_DATA:
+	myprint("running for " + key)
+	count, bon = test(testMachine, key)
+	counttotal += count
+	if key == testMachine:
+		countbon += bon
+	else:
+		countbon += (count - bon)
+		
+	myprint("countbon = " + str(countbon) + ", count total = " + str(counttotal) + " per = " + str(countbon / counttotal))
+	#svm = train_machine('Nucleus02')
+	#features = load_features(path)
+
+	#myprint test_against(features, svm)
+	
+	
+#if __name__ == '__main__':
+	#global BUTTON_DATA
+	#handle = getWindowByTitle("EVE - Miss Tadaruwa", True)
+	#You can open a screenshot of the game in paint (ex : sample01.png)
+	# then use the below code and comment out the line above.
+	# you can use method like testClicks() to validate code without using Eve Online.
+	#handle = getWindowByTitle("Paint", False)
+	#updateEveScreen(handle[0])
+	#initScreenButtons()
+	
+	#testClicks()
+	
+	# Testing the board's coordinate, seem to be fine
+	#startIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL, BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT], gScreenWidth)
+	#endIndex = toPixIndex([BUTTON_COORD["BoardTopLeft"][0] - gScreenOffsetL + BOARD_SIZE[0], BUTTON_COORD["BoardTopLeft"][1] - gScreenOffsetT + BOARD_SIZE[1]], gScreenWidth)
+	#startCoord = toXYCoord(startIndex, gScreenWidth)
+	#endCoord = toXYCoord(endIndex, gScreenWidth)
+	#moveMouse(startCoord[0] + gScreenOffsetL, startCoord[1] + gScreenOffsetT)
+	#sleep(1.0)
+	#moveMouse(endCoord[0] + gScreenOffsetL, endCoord[1] + gScreenOffsetT)
+	
+	# Testing with paint
+	#data = ProcessData()
+	#runPaint(data)
+	#import matplotlib.pyplot as plt
+	#a = colorize(data.nuclei)
+	#a = numpy.array(a)
+	#a = a.reshape(395,395)
+	#plt.imshow(a)
+	#plt.show()
+
+	#1. Run Eve Online
+	#2. Open the Discovery window and let a sample load (skip tutorial)
+	#3. Run script
+	#4. This will play 100 games and take a screenshot of the result and put it in "samples" folder
+	#for x in range(100):
+	#	myprint("-------- Processing img " + str(gScreenshotCount) + "----------")
+	#	data = ProcessData()
+	#	performTests(data)
+	#	#runSequence(data.resultButtons, handle[0])
+	#	updateEveScreen(handle[0])
+	
+	# This will move the mouse to all the useful buttons in the game as a quick test to make sure they are valid, from top left to bottom right in order
+	#testClicks()
+	
+	# Generate Training data in a csv file (for the selected TRAINING_DATA_NAME)
+	#BUTTON_DATA = SPECIAL_BUTTON_DATA
+	#updateTrainingJson(True)
+	#sys.exit()
+	
