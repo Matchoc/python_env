@@ -1,2 +1,4 @@
 /npp/session.xml
 /npp/config.xml
+/python310/Lib/site-packages/tensorflow/python/_pywrap_tensorflow_internal.pyd
+/npp/backup*
